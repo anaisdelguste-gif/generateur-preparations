@@ -941,7 +941,12 @@ async function genererPDF(){
    pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',marge,yMm,largeurUtileMm,hauteurMm);
    yMm+=hauteurMm;
   }
-  const ESPACE_SECTION=8,ESPACE_PARAGRAPHE=4,ESPACE_ITEM=3;
+  const ESPACE_SECTION=9,ESPACE_PARAGRAPHE=4,ESPACE_ITEM=3;
+  // Titre de section embelli : icône + police élégante + filet de couleur, cohérent
+  // avec le style de l'application.
+  function titreSection(emoji,texte){
+   return `<h3 style="font-family:var(--serif);font-size:17.5px;color:var(--deep);margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:9px"><span style="font-size:19px">${emoji}</span>${esc(texte)}</h3>`;
+  }
   // Découpe un texte en paragraphes (sur les lignes vides), en repli sur les simples
   // sauts de ligne si un paragraphe est lui-même très long.
   function paragraphes(texteBrut){
@@ -953,21 +958,24 @@ async function genererPDF(){
    });
    return unites.length?unites:[texteBrut||'—'];
   }
-  async function placerSection(titre,texteBrut){
+  async function placerSection(emoji,titre,texteBrut){
    const paras=paragraphes(texteBrut);
-   await placer(`<h3 style="margin:0 0 8px">${esc(titre)}</h3><div class="pre">${mdGrasVersHtml(paras[0])}</div>`,ESPACE_SECTION);
+   await placer(`${titreSection(emoji,titre)}<div class="pre">${mdGrasVersHtml(paras[0])}</div>`,ESPACE_SECTION);
    for(let i=1;i<paras.length;i++){
     await placer(`<div class="pre">${mdGrasVersHtml(paras[i])}</div>`,ESPACE_PARAGRAPHE);
    }
   }
 
   // --- Titre + informations générales ---
-  await placer(`<h1 id="pt" style="margin:0 0 10px">${esc(v('titre')||'Préparation')}</h1><div class="meta">${$('pmeta').innerHTML}</div>`);
+  await placer(`<div style="text-align:center;margin-bottom:14px">
+    <h1 style="font-family:var(--serif);font-size:25px;color:var(--deep);margin:0 0 8px">${esc(v('titre')||'Préparation')}</h1>
+    <div style="height:3px;width:90px;margin:0 auto;background:linear-gradient(90deg,var(--mauve),var(--rose));border-radius:3px"></div>
+   </div><div class="meta">${$('pmeta').innerHTML}</div>`);
 
   // --- Objectif(s), Matériel, Vocabulaire ---
-  await placerSection("Objectif(s)",v('objectif'));
-  await placerSection("Matériel",v('materiel2'));
-  await placerSection("Vocabulaire",v('vocabulaire2'));
+  await placerSection("🎯","Objectif(s)",v('objectif'));
+  await placerSection("🧰","Matériel",v('materiel2'));
+  await placerSection("🗣️","Vocabulaire",v('vocabulaire2'));
 
   // --- Référentiel : un bloc par référence, jamais coupé ---
   const s=selection();
@@ -978,7 +986,7 @@ async function genererPDF(){
    let premier=true;
    for(const [k,arr] of groupes){
     const [n,d]=k.split('|');
-    const entete=`${premier?'<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3>':''}<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b><div style="margin-top:6px">${
+    const entete=`${premier?titreSection('📖','Référentiel des compétences initiales — contenus et attendus'):''}<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b><div style="margin-top:6px">${
      (()=>{const o=arr[0];return `<span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div>`;})()
     }</div></div>`;
     await placer(entete,ESPACE_SECTION);
@@ -989,26 +997,26 @@ async function genererPDF(){
     premier=false;
    }
   }else{
-   await placer(`<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3><div class="box">Aucun élément sélectionné.</div>`,ESPACE_SECTION);
+   await placer(`${titreSection('📖','Référentiel des compétences initiales — contenus et attendus')}<div class="box">Aucun élément sélectionné.</div>`,ESPACE_SECTION);
   }
 
   // --- Photos ---
   if(photos.length){
    for(let i=0;i<photos.length;i+=3){
     const groupe=photos.slice(i,i+3);
-    await placer((i===0?'<h3 style="margin:0 0 8px">Photos</h3>':'')+`<div class="aperçu-photos">${groupe.map(p=>`<figure><img src="${p.dataUrl}" alt=""><figcaption>${esc(p.name)}</figcaption></figure>`).join('')}</div>`,i===0?ESPACE_SECTION:ESPACE_PARAGRAPHE);
+    await placer((i===0?titreSection('🖼️','Photos'):'')+`<div class="aperçu-photos">${groupe.map(p=>`<figure><img src="${p.dataUrl}" alt=""><figcaption>${esc(p.name)}</figcaption></figure>`).join('')}</div>`,i===0?ESPACE_SECTION:ESPACE_PARAGRAPHE);
    }
   }
   // --- Documents joints ---
   if(pdfs.length){
-   await placer(`<h3 style="margin:0 0 8px">Document(s) joint(s)</h3><div class="pdfs-joints">${pdfs.map(p=>`<div class="pdfjoint-item"><span class="clip">📎</span><span>${esc(p.name)}</span></div>`).join('')}<div class="pdfjoint-note">Document(s) à consulter et imprimer séparément — non inclus dans cette impression.</div></div>`,ESPACE_SECTION);
+   await placer(`${titreSection('📎','Document(s) joint(s)')}<div class="pdfs-joints">${pdfs.map(p=>`<div class="pdfjoint-item"><span class="clip">📎</span><span>${esc(p.name)}</span></div>`).join('')}<div class="pdfjoint-note">Document(s) à consulter et imprimer séparément — non inclus dans cette impression.</div></div>`,ESPACE_SECTION);
   }
 
   // --- Déroulement, Différenciation, Indicateurs, Remédiation & dépassement ---
-  await placerSection("Déroulement",v('deroulement'));
-  await placerSection("Différenciation",v('differenciation'));
-  await placerSection("Indicateurs de réussite",v('observables'));
-  await placerSection("Remédiation & dépassement",v('remediation'));
+  await placerSection("🚶","Déroulement",v('deroulement'));
+  await placerSection("🎚️","Différenciation",v('differenciation'));
+  await placerSection("✅","Indicateurs de réussite",v('observables'));
+  await placerSection("🛟","Remédiation & dépassement",v('remediation'));
 
   // --- Mention finale ---
   await placer(`<div class="genfooter" style="margin-top:0">Cette préparation a été générée à l'aide de l'outil « Générateur de préparations — Maternelle », conçu et développé par Anaïs Delguste Ruelle</div>`,ESPACE_SECTION);
