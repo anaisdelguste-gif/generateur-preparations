@@ -898,13 +898,17 @@ async function genererPDF(){
    await new Promise(r=>setTimeout(r,0));
    return window.html2canvas(zone,{scale:2,backgroundColor:'#ffffff',useCORS:true});
   }
-  async function placer(html){
+  async function placer(html,espaceMm){
+   espaceMm=espaceMm===undefined?4:espaceMm;
    const canvas=await capturer(html);
    const hauteurMm=canvas.height*largeurUtileMm/canvas.width;
+   const enHautDePage=yMm<=marge+0.5;
+   if(!enHautDePage){yMm+=espaceMm;}
    if(hauteurMm>hauteurUtileMm){
     // Bloc exceptionnellement plus haut qu'une page entière (rare) : on le découpe en
     // tranches, en cherchant une ligne quasi blanche proche de chaque limite de page,
     // en repli de sécurité uniquement pour ce cas particulier.
+    if(yMm>pageH-marge){pdf.addPage();yMm=marge;}
     const pxParMm=canvas.width/largeurUtileMm;
     const hauteurUtilePx=Math.round(hauteurUtileMm*pxParMm);
     const ctxSrc=canvas.getContext('2d');
@@ -937,6 +941,7 @@ async function genererPDF(){
    pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',marge,yMm,largeurUtileMm,hauteurMm);
    yMm+=hauteurMm;
   }
+  const ESPACE_SECTION=8,ESPACE_PARAGRAPHE=4,ESPACE_ITEM=3;
   // Découpe un texte en paragraphes (sur les lignes vides), en repli sur les simples
   // sauts de ligne si un paragraphe est lui-même très long.
   function paragraphes(texteBrut){
@@ -950,9 +955,9 @@ async function genererPDF(){
   }
   async function placerSection(titre,texteBrut){
    const paras=paragraphes(texteBrut);
-   await placer(`<h3 style="margin:0 0 8px">${esc(titre)}</h3><div class="pre">${mdGrasVersHtml(paras[0])}</div>`);
+   await placer(`<h3 style="margin:0 0 8px">${esc(titre)}</h3><div class="pre">${mdGrasVersHtml(paras[0])}</div>`,ESPACE_SECTION);
    for(let i=1;i<paras.length;i++){
-    await placer(`<div class="pre">${mdGrasVersHtml(paras[i])}</div>`);
+    await placer(`<div class="pre">${mdGrasVersHtml(paras[i])}</div>`,ESPACE_PARAGRAPHE);
    }
   }
 
@@ -976,27 +981,27 @@ async function genererPDF(){
     const entete=`${premier?'<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3>':''}<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b><div style="margin-top:6px">${
      (()=>{const o=arr[0];return `<span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div>`;})()
     }</div></div>`;
-    await placer(entete);
+    await placer(entete,ESPACE_SECTION);
     for(let i=1;i<arr.length;i++){
      const o=arr[i];
-     await placer(`<div class="box ${classeNiv(n)}"><div><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div></div>`);
+     await placer(`<div class="box ${classeNiv(n)}"><div><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div></div>`,ESPACE_ITEM);
     }
     premier=false;
    }
   }else{
-   await placer(`<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3><div class="box">Aucun élément sélectionné.</div>`);
+   await placer(`<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3><div class="box">Aucun élément sélectionné.</div>`,ESPACE_SECTION);
   }
 
   // --- Photos ---
   if(photos.length){
    for(let i=0;i<photos.length;i+=3){
     const groupe=photos.slice(i,i+3);
-    await placer((i===0?'<h3 style="margin:0 0 8px">Photos</h3>':'')+`<div class="aperçu-photos">${groupe.map(p=>`<figure><img src="${p.dataUrl}" alt=""><figcaption>${esc(p.name)}</figcaption></figure>`).join('')}</div>`);
+    await placer((i===0?'<h3 style="margin:0 0 8px">Photos</h3>':'')+`<div class="aperçu-photos">${groupe.map(p=>`<figure><img src="${p.dataUrl}" alt=""><figcaption>${esc(p.name)}</figcaption></figure>`).join('')}</div>`,i===0?ESPACE_SECTION:ESPACE_PARAGRAPHE);
    }
   }
   // --- Documents joints ---
   if(pdfs.length){
-   await placer(`<h3 style="margin:0 0 8px">Document(s) joint(s)</h3><div class="pdfs-joints">${pdfs.map(p=>`<div class="pdfjoint-item"><span class="clip">📎</span><span>${esc(p.name)}</span></div>`).join('')}<div class="pdfjoint-note">Document(s) à consulter et imprimer séparément — non inclus dans cette impression.</div></div>`);
+   await placer(`<h3 style="margin:0 0 8px">Document(s) joint(s)</h3><div class="pdfs-joints">${pdfs.map(p=>`<div class="pdfjoint-item"><span class="clip">📎</span><span>${esc(p.name)}</span></div>`).join('')}<div class="pdfjoint-note">Document(s) à consulter et imprimer séparément — non inclus dans cette impression.</div></div>`,ESPACE_SECTION);
   }
 
   // --- Déroulement, Différenciation, Indicateurs, Remédiation & dépassement ---
@@ -1006,7 +1011,7 @@ async function genererPDF(){
   await placerSection("Remédiation & dépassement",v('remediation'));
 
   // --- Mention finale ---
-  await placer(`<div class="genfooter" style="margin-top:0">Cette préparation a été générée à l'aide de l'outil « Générateur de préparations — Maternelle », conçu et développé par Anaïs Delguste Ruelle</div>`);
+  await placer(`<div class="genfooter" style="margin-top:0">Cette préparation a été générée à l'aide de l'outil « Générateur de préparations — Maternelle », conçu et développé par Anaïs Delguste Ruelle</div>`,ESPACE_SECTION);
 
   const nom=(v('titre')||'preparation').replace(/[^\w\u00C0-\u017F -]/g,'').trim().slice(0,60)||'preparation';
   const blobPdf=pdf.output('blob');
