@@ -216,7 +216,7 @@ main{padding:0;max-width:none}.card{box-shadow:none;border:0;padding:0}#apercu{d
 
 <div class="card">
   <div class="head"><span class="step">5</span><h2>Photos et documents</h2></div>
-  <p class="help">Les photos ajoutées ici s'affichent dans l'aperçu et à l'impression, avec le plus grand côté ramené à 5 cm. Les documents PDF, eux, ne sont jamais imprimés avec la préparation : ils restent à part, à ouvrir et imprimer séparément si besoin (par exemple une fiche ou un modèle à distribuer).</p>
+  <p class="help">Les photos ajoutées ici s'affichent dans l'aperçu et à l'impression, avec le plus grand côté ramené à 5 cm. Les documents PDF, eux, ne sont jamais imprimés avec la préparation : ils restent à part, à ouvrir et imprimer séparément si besoin (par exemple une fiche ou un modèle à distribuer). Si tu ajoutes des photos ou documents <b>avant de générer</b> ta préparation (étape 6), l'IA les regarde et adapte le déroulement, le matériel et le vocabulaire en fonction de ce qu'elle y voit.</p>
   <div class="grid2" style="margin-top:10px">
     <label class="fld">Ajouter une ou plusieurs photos<input type="file" id="inputPhotos" accept="image/*" multiple></label>
     <label class="fld">Ajouter un ou plusieurs PDF<input type="file" id="inputPdfs" accept="application/pdf" multiple></label>
@@ -603,6 +603,7 @@ MATÉRIEL DÉJÀ PRÉVU PAR L'ENSEIGNANTE, à inclure tel quel dans ta liste fin
 VOCABULAIRE DÉJÀ PRÉVU PAR L'ENSEIGNANTE, à inclure tel quel dans ta liste finale sans le signaler ni le commenter : ${v('vocabulaire')||'(rien de précisé par l\'enseignante : complète entièrement toi-même la liste, sans jamais écrire qu\'aucun vocabulaire n\'était prévu)'}
 CONTRAINTES PARTICULIÈRES : ${v('consignes')||'aucune'}
 PRÉCISION SUPPLÉMENTAIRE : ${v('affinage')||'aucune'}
+${(photos.length||pdfs.length)?`\nPIÈCES JOINTES : ${photos.length?photos.length+' photo(s)':''}${photos.length&&pdfs.length?' et ':''}${pdfs.length?pdfs.length+' document(s) PDF':''} sont joint(s) à ce message, juste avant ce texte. Observe-les attentivement (matériel visible, environnement, disposition, contenu écrit du document…) et adapte précisément le déroulement, le matériel et le vocabulaire pour qu'ils correspondent à ce qui y est concrètement visible — ne les ignore pas et ne les décris pas en termes vagues.`:''}
 
 RÈGLE DE FORME, valable pour toutes les rubriques : n'écris jamais de commentaire sur ce qui était ou n'était pas prévu au départ (ne dis jamais des phrases comme « aucun matériel n'était prévu » ou « l'enseignante n'a rien précisé »). Donne uniquement le résultat final, directement utilisable, comme si tu rédigeais la préparation depuis le début.`;
 }
@@ -713,8 +714,39 @@ function appliquerSelectionAuto(codes){
  return notFound;
 }
 /* Appelle l'API Gemini et renvoie l'objet JSON déjà analysé. */
-async function appellerGemini(promptTexte,signal,tentative){
+/* Convertit une image (dataUrl) ou un fichier (Blob/URL objet) en pièce jointe Gemini
+   ({inlineData:{mimeType,data}}), pour que l'IA puisse vraiment "voir" les photos et
+   documents joints par l'enseignante avant de générer la préparation. */
+async function fichierEnBase64(source){
+ let blob=source;
+ if(typeof source==='string'){
+  if(source.startsWith('data:')){
+   const [entete,data]=source.split(',');
+   const mime=entete.match(/^data:([^;]+);/)?.[1]||'application/octet-stream';
+   return {mimeType:mime,data};
+  }
+  const r=await fetch(source);blob=await r.blob();
+ }
+ return new Promise((resolve,reject)=>{
+  const reader=new FileReader();
+  reader.onload=()=>resolve({mimeType:blob.type||'application/octet-stream',data:reader.result.split(',')[1]});
+  reader.onerror=reject;
+  reader.readAsDataURL(blob);
+ });
+}
+async function construirePiecesJointes(){
+ const parts=[];
+ for(const p of photos.slice(0,4)){ // jusqu'à 4 photos, pour rester dans une taille raisonnable
+  try{const{mimeType,data}=await fichierEnBase64(p.dataUrl);parts.push({inlineData:{mimeType,data}})}catch(e){}
+ }
+ for(const doc of pdfs.slice(0,2)){ // jusqu'à 2 documents PDF
+  try{const{mimeType,data}=await fichierEnBase64(doc.url);parts.push({inlineData:{mimeType:'application/pdf',data}})}catch(e){}
+ }
+ return parts;
+}
+async function appellerGemini(promptTexte,signal,tentative,piecesJointes){
  tentative=tentative||1;
+ piecesJointes=piecesJointes||[];
  if(!GEMINI_API_KEY||GEMINI_API_KEY==='COLLE_TA_CLE_GEMINI_ICI'){
   const err=new Error('cle_manquante');err.code='cle_manquante';throw err;
  }
@@ -725,7 +757,7 @@ async function appellerGemini(promptTexte,signal,tentative){
   headers:{'Content-Type':'application/json','x-goog-api-key':GEMINI_API_KEY},
   signal,
   body:JSON.stringify({
-   contents:[{parts:[{text:promptTexte}]}],
+   contents:[{parts:[...piecesJointes,{text:promptTexte}]}],
    generationConfig:{responseMimeType:'application/json',temperature:0.7,maxOutputTokens:32768}
   })
  });
@@ -736,7 +768,7 @@ async function appellerGemini(promptTexte,signal,tentative){
   // deux fois, avec une courte pause, avant d'abandonner.
   if(resp.status===503&&tentative<3){
    await new Promise(r=>setTimeout(r,1500*tentative));
-   return appellerGemini(promptTexte,signal,tentative+1);
+   return appellerGemini(promptTexte,signal,tentative+1,piecesJointes);
   }
   const err=new Error('http_'+resp.status);
   err.code=resp.status===429?'rate_limited':((resp.status===400||resp.status===401||resp.status===403)?'cle_invalide':'erreur_serveur');
@@ -760,14 +792,18 @@ $('btnIA').addEventListener('click',async()=>{
  ctl=new AbortController();
  try{
   const prompt=modeAuto?promptAuto():promptRedaction();
-  const d=await appellerGemini(prompt,ctl.signal);
+  if(photos.length||pdfs.length)statut('<span class="spin"></span>Lecture des photos/documents joints…');
+  const piecesJointes=(photos.length||pdfs.length)?await construirePiecesJointes():[];
+  if(photos.length||pdfs.length)statut(modeAuto?'<span class="spin"></span>Choix des références puis rédaction en cours…':'<span class="spin"></span>Rédaction de la préparation en cours…');
+  const d=await appellerGemini(prompt,ctl.signal,1,piecesJointes);
   if(modeAuto&&Array.isArray(d.selection)){
    const notFound=appliquerSelectionAuto(d.selection);
    if(notFound.length)console.warn('Codes non reconnus, ignorés :',notFound);
   }
   remplir(d);
   const avertissementTronque=d.__tronque?" ⚠️ La réponse a été coupée par manque d'espace : vérifie la fin du déroulement et la remédiation/dépassement, et clique à nouveau sur « Générer » si un champ est incomplet.":"";
-  statut((modeAuto?"Préparation générée : l'IA a choisi les références du référentiel ci-dessus (surlignées en vert). Relis et ajuste si besoin.":"Préparation générée. Relis et ajuste avant d'imprimer.")+avertissementTronque,'ok');
+  const notePieces=(photos.length||pdfs.length)?" (en tenant compte des photos/documents joints)":"";
+  statut((modeAuto?"Préparation générée : l'IA a choisi les références du référentiel ci-dessus (surlignées en vert). Relis et ajuste si besoin.":"Préparation générée"+notePieces+". Relis et ajuste avant d'imprimer.")+avertissementTronque,'ok');
  }catch(e){
   const map={cle_manquante:"Aucune clé Gemini n'a été configurée sur cette page : utilise « 📋 Copier la consigne » en attendant, ou signale-le à la personne qui gère ce générateur.",
    cle_invalide:"La clé Gemini configurée semble invalide ou expirée.",
