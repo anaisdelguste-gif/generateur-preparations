@@ -75,6 +75,20 @@ button.small{padding:7px 11px;font-size:12.5px}
 .editor{margin-top:8px;padding:10px;border:1px dashed var(--mauve);border-radius:10px;background:var(--s2)}
 .editor label{font-size:12px;font-weight:600;display:block;margin-bottom:6px}
 .box{background:var(--s2);border-left:3px solid var(--mauve);padding:10px 12px;border-radius:8px;margin:8px 0;font-size:13.5px}
+.box.niv-m1m2{border-left-color:#c0392b;background:#fdecea;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.box.niv-m1m2 b:first-child{color:#a5281c}
+.box.niv-m3{border-left-color:#1d5ea8;background:#e7f0fb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.box.niv-m3 b:first-child{color:#123d70}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme=light]) .box.niv-m1m2{background:#3a1613;border-left-color:#e5675a}
+ :root:not([data-theme=light]) .box.niv-m1m2 b:first-child{color:#ff8f80}
+ :root:not([data-theme=light]) .box.niv-m3{background:#132a45;border-left-color:#4f8fd8}
+ :root:not([data-theme=light]) .box.niv-m3 b:first-child{color:#8fc0ff}
+}
+:root[data-theme=dark] .box.niv-m1m2{background:#3a1613;border-left-color:#e5675a}
+:root[data-theme=dark] .box.niv-m1m2 b:first-child{color:#ff8f80}
+:root[data-theme=dark] .box.niv-m3{background:#132a45;border-left-color:#4f8fd8}
+:root[data-theme=dark] .box.niv-m3 b:first-child{color:#8fc0ff}
 .note{padding:10px 12px;background:#fdf2e3;border-left:3px solid var(--warn);border-radius:8px;font-size:13px;color:#7a5615}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .note{background:#3a2d16;color:#e8cf9a}}
 .status{min-height:22px;font-weight:600;font-size:13.5px;margin:10px 0 0}
@@ -793,9 +807,10 @@ function apercu(scroll){
  ].filter(Boolean).join('<br>');
  const s=selection();
  const g={};s.forEach(o=>{(g[o.n+'|'+o.d]??=[]).push(o)});
+ const classeNiv=n=>n==='M1-M2'?'niv-m1m2':'niv-m3';
  $('pref').innerHTML=s.length?Object.entries(g).map(([k,arr])=>{
   const [n,d]=k.split('|');
-  return `<div class="box"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b>`+arr.map(o=>
+  return `<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b>`+arr.map(o=>
    `<div style="margin-top:6px"><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div>`).join('')+'</div>';
  }).join(''):'<div class="box">Aucun élément sélectionné.</div>';
  [['obj','objectif'],['m','materiel2'],['v','vocabulaire2'],['diff','differenciation'],['obs','observables']]
@@ -954,16 +969,17 @@ async function genererPDF(){
   if(s.length){
    const g={};s.forEach(o=>{(g[o.n+'|'+o.d]??=[]).push(o)});
    const groupes=Object.entries(g);
+   const classeNiv=n=>n==='M1-M2'?'niv-m1m2':'niv-m3';
    let premier=true;
    for(const [k,arr] of groupes){
     const [n,d]=k.split('|');
-    const entete=`${premier?'<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3>':''}<div class="box"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b><div style="margin-top:6px">${
+    const entete=`${premier?'<h3 style="margin:0 0 8px">Référentiel des compétences initiales — contenus et attendus</h3>':''}<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b><div style="margin-top:6px">${
      (()=>{const o=arr[0];return `<span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div>`;})()
     }</div></div>`;
     await placer(entete);
     for(let i=1;i<arr.length;i++){
      const o=arr[i];
-     await placer(`<div class="box"><div><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div></div>`);
+     await placer(`<div class="box ${classeNiv(n)}"><div><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div></div>`);
     }
     premier=false;
    }
