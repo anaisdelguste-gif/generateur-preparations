@@ -529,7 +529,7 @@ function majResume(){
  const s=selection();
  if(!s.length){$('resume').textContent='Rien de sélectionné pour l\'instant.';return}
  const g={};s.forEach(o=>{const k=o.n+'|'+o.d;(g[k]??=[]).push(o)});
- $('resume').innerHTML=Object.entries(g).map(([k,arr])=>{
+ $('resume').innerHTML=Object.entries(g).sort(([a],[b])=>a.localeCompare(b)).map(([k,arr])=>{
   const [n,d]=k.split('|');
   return `<div style="margin-bottom:10px"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b>`+
    arr.map(o=>`<div style="margin-top:5px"><span class="code-badge">${esc(o.ref||'—')}</span><span style="font-weight:600">${esc(typeLabel(o.t))} :</span> ${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div>`).join('')+'</div>';
@@ -578,7 +578,7 @@ document.addEventListener('change',e=>{
 function refsParNiveau(liste){
  const g={};
  liste.forEach(o=>{(g[o.n]??=[]).push(o)});
- return Object.entries(g).map(([n,arr])=>
+ return Object.entries(g).sort(([a],[b])=>a.localeCompare(b)).map(([n,arr])=>
   `— ${NIVLABEL[n]} :\n`+arr.map(o=>`  • [${o.ref||'?'}] ${typeLabel(o.t)} (${o.d}${o.a?' / '+o.a:''})\n    CONTENU : ${o.c}\n    ATTENDU : ${o.at||'(non renseigné)'}`).join('\n')
  ).join('\n\n')||'Aucun élément sélectionné.';
 }
@@ -844,7 +844,7 @@ function apercu(scroll){
  const s=selection();
  const g={};s.forEach(o=>{(g[o.n+'|'+o.d]??=[]).push(o)});
  const classeNiv=n=>n==='M1-M2'?'niv-m1m2':'niv-m3';
- $('pref').innerHTML=s.length?Object.entries(g).map(([k,arr])=>{
+ $('pref').innerHTML=s.length?Object.entries(g).sort(([a],[b])=>a.localeCompare(b)).map(([k,arr])=>{
   const [n,d]=k.split('|');
   return `<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b>`+arr.map(o=>
    `<div style="margin-top:6px"><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div>`).join('')+'</div>';
@@ -907,164 +907,247 @@ async function genererPDF(){
  const btn=$('btnPDF'), texteOriginal=btn.textContent;
  btn.disabled=true;btn.textContent='⏳ Préparation du PDF…';
  statut('<span class="spin"></span>Génération du PDF en cours…');
- let zone=null;
  try{
-  if(!window.html2canvas)await chargerScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
   if(!window.jspdf)await chargerScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
   const {jsPDF}=window.jspdf;
-  const pdf=new jsPDF('p','mm','a4');
-  const pageW=210,pageH=297,marge=12; // marge ≥ 5 mm imposée sur les quatre côtés
-  const largeurUtileMm=pageW-2*marge;
-  const hauteurUtileMm=pageH-2*marge;
-  const LARGEUR_PX=780;
+  const pdf=new jsPDF({unit:'mm',format:'a4'});
+  const pageW=210,pageH=297,marge=15; // marge ≥ 5 mm imposée, généreuse pour un rendu soigné
+  const maxWidth=pageW-marge*2;
+  const COULEUR_MAUVE=[139,95,168], COULEUR_DEEP=[106,65,131], COULEUR_ROSE=[225,155,190];
+  const NIV_COULEUR={'M1-M2':[192,57,43],'M3':[29,94,168]};
+  const TYPE_COULEUR={S:[95,143,168],SF:[168,130,95],C:[139,95,168]};
 
-  // Zone de rendu hors écran, largeur fixe (indépendante de l'appareil), dans laquelle
-  // chaque bloc de contenu (un paragraphe, un élément du référentiel…) est rendu et
-  // capturé UN PAR UN : on ne coupe donc jamais une ligne de texte au milieu, seulement
-  // entre deux blocs.
-  zone=document.createElement('div');
-  zone.className='pre'; // hérite de la même police/taille que l'aperçu
-  zone.style.cssText=`position:absolute;left:-99999px;top:0;width:${LARGEUR_PX}px;background:#fff;padding:0;margin:0;`;
-  document.body.appendChild(zone);
+  // --- Bandeau de titre coloré, en haut de la première page uniquement ---
+  const bandeauH=30;
+  pdf.setFillColor(...COULEUR_MAUVE);
+  pdf.rect(0,0,pageW,bandeauH,'F');
+  pdf.setTextColor(255,255,255);
+  pdf.setFont('times','bold');pdf.setFontSize(19);
+  const titreLignes=pdf.splitTextToSize(v('titre')||'Préparation',maxWidth).slice(0,2);
+  let ty=13;
+  titreLignes.forEach(l=>{pdf.text(l,marge,ty);ty+=8;});
+  pdf.setFont('helvetica','normal');pdf.setFontSize(9);
+  pdf.setTextColor(238,222,240);
+  pdf.text('Générateur de préparations — Maternelle',marge,bandeauH-6);
+  pdf.setTextColor(30,30,30);
 
-  let yMm=marge;
+  let y=bandeauH+11;
+  const ensureRoom=(besoin)=>{ if(y+besoin>pageH-18){pdf.addPage();y=marge;} };
 
-  async function capturer(html){
-   zone.innerHTML=html;
-   await new Promise(r=>setTimeout(r,0));
-   return window.html2canvas(zone,{scale:2,backgroundColor:'#ffffff',useCORS:true});
+  // --- Bloc informations générales ---
+  ensureRoom(26);
+  pdf.setFillColor(246,242,248);
+  const metaLignes=[
+   ['Niveau(x)',niveauxClasse().join(', ')||'—'],
+   ['Durée',v('duree')||'—'],
+   ['Organisation',$('organisation').value||'—'],
+   ['Discipline(s)',(discCoches().join(', ')||[...new Set(selection().map(o=>o.d))].join(', ')||'—')],
+  ];
+  if(v('contexte'))metaLignes.push(['Contexte',v('contexte')]);
+  const hMeta=6+metaLignes.reduce((acc,[,val])=>acc+pdf.splitTextToSize(val,maxWidth-32).length*4.6+0.6,0);
+  pdf.roundedRect(marge,y,maxWidth,hMeta,2,2,'F');
+  let ym=y+5.5;
+  metaLignes.forEach(([label,val])=>{
+   pdf.setFont('helvetica','bold');pdf.setFontSize(9.5);pdf.setTextColor(60,45,70);
+   pdf.text(label+' :',marge+4,ym);
+   pdf.setFont('helvetica','normal');pdf.setTextColor(40,40,40);
+   const lignes=pdf.splitTextToSize(val,maxWidth-32);
+   lignes.forEach((l,i)=>{pdf.text(l,marge+32,ym+i*4.6);});
+   ym+=lignes.length*4.6+0.6;
+  });
+  y+=hMeta+9;
+
+  // --- Titre de section : petite barre colorée + texte ---
+  const iconeCache={};
+  function iconeImage(emoji){
+   if(iconeCache[emoji])return iconeCache[emoji];
+   const cv=document.createElement('canvas');
+   const taille=64;cv.width=taille;cv.height=taille;
+   const ctx=cv.getContext('2d');
+   ctx.font=Math.round(taille*0.78)+'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+   ctx.textAlign='center';ctx.textBaseline='middle';
+   ctx.fillText(emoji,taille/2,taille/2+2);
+   const data=cv.toDataURL('image/png');
+   iconeCache[emoji]=data;
+   return data;
   }
-  async function placer(html,espaceMm){
-   espaceMm=espaceMm===undefined?4:espaceMm;
-   const canvas=await capturer(html);
-   const hauteurMm=canvas.height*largeurUtileMm/canvas.width;
-   const enHautDePage=yMm<=marge+0.5;
-   if(!enHautDePage){yMm+=espaceMm;}
-   if(hauteurMm>hauteurUtileMm){
-    // Bloc exceptionnellement plus haut qu'une page entière (rare) : on le découpe en
-    // tranches, en cherchant une ligne quasi blanche proche de chaque limite de page,
-    // en repli de sécurité uniquement pour ce cas particulier.
-    if(yMm>pageH-marge){pdf.addPage();yMm=marge;}
-    const pxParMm=canvas.width/largeurUtileMm;
-    const hauteurUtilePx=Math.round(hauteurUtileMm*pxParMm);
-    const ctxSrc=canvas.getContext('2d');
-    function coupureBlanche(depart,cible){
-     const zoneRecherchePx=Math.round(15*pxParMm);
-     const limiteBasse=Math.max(depart+Math.round(hauteurUtilePx*0.4),cible-zoneRecherchePx);
-     for(let y=cible;y>limiteBasse;y-=6){
-      const ligne=ctxSrc.getImageData(0,y,canvas.width,1).data;
-      let total=0,compte=0;
-      for(let x=0;x<canvas.width;x+=8){const i=x*4;total+=(ligne[i]+ligne[i+1]+ligne[i+2])/3;compte++;}
-      if(compte&&(total/compte)>250)return y;
-     }
-     return cible;
-    }
-    let pos=0;
-    while(pos<canvas.height){
-     let fin=Math.min(pos+hauteurUtilePx,canvas.height);
-     if(fin<canvas.height)fin=coupureBlanche(pos,fin);
-     const h=Math.max(1,fin-pos);
-     const tr=document.createElement('canvas');tr.width=canvas.width;tr.height=h;
-     tr.getContext('2d').drawImage(canvas,0,pos,canvas.width,h,0,0,canvas.width,h);
-     const hMm=h/pxParMm;
-     if(yMm+hMm>pageH-marge){pdf.addPage();yMm=marge;}
-     pdf.addImage(tr.toDataURL('image/jpeg',0.92),'JPEG',marge,yMm,largeurUtileMm,hMm);
-     yMm+=hMm;pos=fin;
-    }
-    return;
-   }
-   if(yMm+hauteurMm>pageH-marge && yMm>marge+1){pdf.addPage();yMm=marge;}
-   pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',marge,yMm,largeurUtileMm,hauteurMm);
-   yMm+=hauteurMm;
-  }
-  const ESPACE_SECTION=9,ESPACE_PARAGRAPHE=4,ESPACE_ITEM=3;
-  // Titre de section embelli : icône + police élégante + filet de couleur, cohérent
-  // avec le style de l'application.
   function titreSection(emoji,texte){
-   return `<h3 style="font-family:var(--serif);font-size:17.5px;color:var(--deep);margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:9px"><span style="font-size:19px">${emoji}</span>${esc(texte)}</h3>`;
-  }
-  // Découpe un texte en paragraphes (sur les lignes vides), en repli sur les simples
-  // sauts de ligne si un paragraphe est lui-même très long.
-  function paragraphes(texteBrut){
-   const gros=String(texteBrut||'').split(/\n\s*\n/).filter(p=>p.trim());
-   const unites=[];
-   gros.forEach(p=>{
-    if(p.length>900){unites.push(...p.split(/\n/).filter(l=>l.trim()))}
-    else unites.push(p);
-   });
-   return unites.length?unites:[texteBrut||'—'];
-  }
-  async function placerSection(emoji,titre,texteBrut){
-   const paras=paragraphes(texteBrut);
-   await placer(`${titreSection(emoji,titre)}<div class="pre">${mdGrasVersHtml(paras[0])}</div>`,ESPACE_SECTION);
-   for(let i=1;i<paras.length;i++){
-    await placer(`<div class="pre">${mdGrasVersHtml(paras[i])}</div>`,ESPACE_PARAGRAPHE);
+   if(y>bandeauH+11.5)y+=6; // espace avant le titre, pour bien le séparer du texte précédent
+   ensureRoom(12);
+   try{
+    pdf.addImage(iconeImage(emoji),'PNG',marge,y-5.4,6.2,6.2);
+   }catch(e){
+    pdf.setFillColor(...COULEUR_MAUVE);
+    pdf.roundedRect(marge,y-4.2,3.2,6,1,1,'F');
    }
+   pdf.setFont('times','bold');pdf.setFontSize(13.5);pdf.setTextColor(...COULEUR_DEEP);
+   pdf.text(texte,marge+9,y);
+   pdf.setDrawColor(230,220,232);pdf.setLineWidth(0.4);
+   pdf.line(marge,y+2.6,pageW-marge,y+2.6);
+   pdf.setTextColor(30,30,30);
+   y+=10;
   }
 
-  // --- Titre + informations générales ---
-  await placer(`<div style="text-align:center;margin-bottom:14px">
-    <h1 style="font-family:var(--serif);font-size:25px;color:var(--deep);margin:0 0 8px">${esc(v('titre')||'Préparation')}</h1>
-    <div style="height:3px;width:90px;margin:0 auto;background:linear-gradient(90deg,var(--mauve),var(--rose));border-radius:3px"></div>
-   </div><div class="meta">${$('pmeta').innerHTML}</div>`);
+  // --- Paragraphe : gère "**Titre en gras**" (seul sur sa ligne), les tirets de liste,
+  // et le texte normal — mêmes conventions que le reste du générateur. ---
+  function ecrireParagraphe(texteBrut){
+   pdf.setFont('helvetica','normal');pdf.setFontSize(10.5);pdf.setTextColor(30,30,30);
+   String(texteBrut||'—').split('\n').forEach(ligne=>{
+    const t=ligne.trim();
+    if(!t){y+=3;return;}
+    const mGras=/^\*\*(.+)\*\*$/.exec(t);
+    if(mGras){
+     ensureRoom(8);
+     pdf.setFont('helvetica','bold');pdf.setFontSize(11);pdf.setTextColor(...COULEUR_DEEP);
+     pdf.splitTextToSize(mGras[1],maxWidth).forEach(l=>{ensureRoom(6);pdf.text(l,marge,y);y+=5.6;});
+     pdf.setFont('helvetica','normal');pdf.setFontSize(10.5);pdf.setTextColor(30,30,30);
+     y+=1;
+     return;
+    }
+    const mPuce=/^[-•]\s+(.+)$/.exec(t);
+    if(mPuce){
+     const lignes=pdf.splitTextToSize(mPuce[1],maxWidth-6);
+     lignes.forEach((l,i)=>{
+      ensureRoom(5.2);
+      if(i===0)pdf.text('•',marge+1,y);
+      pdf.text(l,marge+6,y);y+=5.2;
+     });
+     return;
+    }
+    const propre=t.replace(/\*\*/g,'');
+    pdf.splitTextToSize(propre,maxWidth).forEach(l=>{ensureRoom(5.2);pdf.text(l,marge,y);y+=5.2;});
+   });
+   y+=3;
+  }
+  function ecrireSection(emoji,titre,texteBrut){
+   titreSection(emoji,titre);
+   ecrireParagraphe(texteBrut);
+   y+=3;
+  }
 
-  // --- Objectif(s), Matériel, Vocabulaire ---
-  await placerSection("🎯","Objectif(s)",v('objectif'));
-  await placerSection("🧰","Matériel",v('materiel2'));
-  await placerSection("🗣️","Vocabulaire",v('vocabulaire2'));
+  ecrireSection('🎯','Objectif(s)',v('objectif'));
+  ecrireSection('🧰','Matériel',v('materiel2'));
+  ecrireSection('🗣️','Vocabulaire',v('vocabulaire2'));
 
-  // --- Référentiel : un bloc par référence, jamais coupé ---
+  // --- Référentiel des compétences initiales ---
   const s=selection();
+  titreSection('📖','Référentiel des compétences initiales — contenus et attendus');
   if(s.length){
    const g={};s.forEach(o=>{(g[o.n+'|'+o.d]??=[]).push(o)});
-   const groupes=Object.entries(g);
-   const classeNiv=n=>n==='M1-M2'?'niv-m1m2':'niv-m3';
-   let premier=true;
-   for(const [k,arr] of groupes){
+   const groupes=Object.entries(g).sort(([a],[b])=>a.localeCompare(b));
+   groupes.forEach(([k,arr])=>{
     const [n,d]=k.split('|');
-    const entete=`${premier?titreSection('📖','Référentiel des compétences initiales — contenus et attendus'):''}<div class="box ${classeNiv(n)}"><b>${esc(NIVLABEL[n])} — ${esc(d)}</b><div style="margin-top:6px">${
-     (()=>{const o=arr[0];return `<span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div>`;})()
-    }</div></div>`;
-    await placer(entete,ESPACE_SECTION);
-    for(let i=1;i<arr.length;i++){
-     const o=arr[i];
-     await placer(`<div class="box ${classeNiv(n)}"><div><span class="code-badge">${esc(o.ref||'—')}</span><b>${esc(typeLabel(o.t))}</b>${o.a?' <span style="opacity:.7">('+esc(o.a)+')</span>':''}<br>${esc(o.c)}<div class="att"><b>Attendu :</b> ${esc(o.at||'—')}</div></div></div>`,ESPACE_ITEM);
-    }
-    premier=false;
-   }
+    ensureRoom(9);
+    pdf.setFont('helvetica','bold');pdf.setFontSize(10);pdf.setTextColor(...COULEUR_DEEP);
+    pdf.text(`${NIVLABEL[n]} — ${d}`,marge,y);y+=6;
+    pdf.setTextColor(30,30,30);
+    arr.forEach(o=>{
+     ensureRoom(14);
+     const nc=NIV_COULEUR[o.n]||COULEUR_MAUVE;
+     const clair=(rgb,m)=>rgb.map(c=>Math.round(c*(1-m)+255*m));
+     const ncClair=clair(nc,0.85);
+     pdf.setFont('helvetica','bold');pdf.setFontSize(8);
+     const codeLabel=o.ref||'—';
+     const codeW=pdf.getTextWidth(codeLabel)+8;
+     pdf.setFillColor(...ncClair);
+     pdf.roundedRect(marge,y-3.6,codeW,4.8,1.2,1.2,'F');
+     pdf.setTextColor(...nc);
+     pdf.text(codeLabel,marge+4,y);
+     const typeTxt=typeLabel(o.t).toUpperCase();
+     pdf.setFontSize(6.8);
+     const typeW=pdf.getTextWidth(typeTxt)+7;
+     const tc=TYPE_COULEUR[o.t]||[120,120,120];
+     const tcClair=clair(tc,0.85);
+     pdf.setFillColor(...tcClair);
+     pdf.roundedRect(marge+codeW+2.5,y-3.3,typeW,4.4,1.2,1.2,'F');
+     pdf.setTextColor(...tc);
+     pdf.text(typeTxt,marge+codeW+6,y);
+     pdf.setTextColor(30,30,30);pdf.setFont('helvetica','normal');pdf.setFontSize(9.5);
+     y+=6;
+     pdf.splitTextToSize(o.c,maxWidth-2).forEach(l=>{ensureRoom(5);pdf.text(l,marge+2,y);y+=5;});
+     if(o.at){
+      pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(90,80,95);
+      pdf.text('Attendu :',marge+2,y);
+      const largeurLabel=pdf.getTextWidth('Attendu :')+2;
+      pdf.setFont('helvetica','normal');
+      const lignesAt=pdf.splitTextToSize(o.at,maxWidth-2-largeurLabel);
+      lignesAt.forEach((l,i)=>{ensureRoom(4.6);pdf.text(l,marge+2+(i===0?largeurLabel:0),y);y+=4.6;});
+      pdf.setTextColor(30,30,30);pdf.setFontSize(9.5);
+     }
+     y+=4;
+    });
+   });
   }else{
-   await placer(`${titreSection('📖','Référentiel des compétences initiales — contenus et attendus')}<div class="box">Aucun élément sélectionné.</div>`,ESPACE_SECTION);
+   pdf.setFont('helvetica','normal');pdf.setFontSize(10);
+   pdf.text('Aucun élément sélectionné.',marge,y);y+=6;
   }
+  y+=3;
 
   // --- Photos ---
   if(photos.length){
-   for(let i=0;i<photos.length;i+=3){
-    const groupe=photos.slice(i,i+3);
-    await placer((i===0?titreSection('🖼️','Photos'):'')+`<div class="aperçu-photos">${groupe.map(p=>`<figure><img src="${p.dataUrl}" alt=""><figcaption>${esc(p.name)}</figcaption></figure>`).join('')}</div>`,i===0?ESPACE_SECTION:ESPACE_PARAGRAPHE);
+   ensureRoom(12+55); // réserve la place du titre + au moins la première photo, pour ne
+                       // jamais laisser "Photos" seul en bas de page
+   titreSection('🖼️','Photos');
+   let x=marge, ligneH=0;
+   for(const p of photos){
+    const img=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=reject;im.src=p.dataUrl;}).catch(()=>null);
+    if(!img)continue;
+    // normalise en JPEG via un canevas pour garantir la compatibilité (photos venant
+    // d'un téléphone, quel que soit leur format d'origine)
+    const cv=document.createElement('canvas');cv.width=img.naturalWidth;cv.height=img.naturalHeight;
+    cv.getContext('2d').drawImage(img,0,0);
+    const jpegData=cv.toDataURL('image/jpeg',0.9);
+    const plusGrandCote=50; // 5 cm, comme demandé
+    const ratio=img.naturalWidth/img.naturalHeight;
+    const [wMm,hMm]=ratio>=1?[plusGrandCote,plusGrandCote/ratio]:[plusGrandCote*ratio,plusGrandCote];
+    if(x+wMm>pageW-marge){x=marge;y+=ligneH+6;ligneH=0;}
+    ensureRoom(hMm+4);
+    pdf.addImage(jpegData,'JPEG',x,y,wMm,hMm);
+    ligneH=Math.max(ligneH,hMm);
+    x+=wMm+6;
    }
+   y+=ligneH+6;
   }
-  // --- Documents joints ---
+
+  // --- Documents PDF joints (mention seulement, jamais le contenu) ---
   if(pdfs.length){
-   await placer(`${titreSection('📎','Document(s) joint(s)')}<div class="pdfs-joints">${pdfs.map(p=>`<div class="pdfjoint-item"><span class="clip">📎</span><span>${esc(p.name)}</span></div>`).join('')}<div class="pdfjoint-note">Document(s) à consulter et imprimer séparément — non inclus dans cette impression.</div></div>`,ESPACE_SECTION);
+   titreSection('📎','Document(s) joint(s)');
+   pdf.setFont('helvetica','normal');pdf.setFontSize(10);
+   pdfs.forEach(p=>{
+    ensureRoom(5.5);
+    pdf.text('📎',marge,y);
+    pdf.splitTextToSize(p.name,maxWidth-6).forEach((l,i)=>{ensureRoom(5);pdf.text(l,marge+6,y);y+=5;});
+   });
+   pdf.setFont('helvetica','italic');pdf.setFontSize(8.5);pdf.setTextColor(120,110,125);
+   pdf.splitTextToSize("Document(s) à consulter et imprimer séparément — non inclus dans cette impression.",maxWidth).forEach(l=>{ensureRoom(4.5);pdf.text(l,marge,y);y+=4.5;});
+   pdf.setTextColor(30,30,30);
+   y+=3;
   }
 
-  // --- Déroulement, Différenciation, Indicateurs, Remédiation & dépassement ---
-  await placerSection("🚶","Déroulement",v('deroulement'));
-  await placerSection("🎚️","Différenciation",v('differenciation'));
-  await placerSection("✅","Indicateurs de réussite",v('observables'));
-  await placerSection("🛟","Remédiation & dépassement",v('remediation'));
+  ecrireSection('🚶','Déroulement',v('deroulement'));
+  ecrireSection('🎚️','Différenciation',v('differenciation'));
+  ecrireSection('✅','Indicateurs de réussite',v('observables'));
+  ecrireSection('🛟','Remédiation & dépassement',v('remediation'));
 
-  // --- Mention finale ---
-  await placer(`<div class="genfooter" style="margin-top:0">Cette préparation a été générée à l'aide de l'outil « Générateur de préparations — Maternelle », conçu et développé par Anaïs Delguste Ruelle</div>`,ESPACE_SECTION);
+  // --- Pied de page sur chaque page : mention + numérotation ---
+  const totalPages=pdf.internal.getNumberOfPages();
+  for(let p=1;p<=totalPages;p++){
+   pdf.setPage(p);
+   pdf.setDrawColor(225,210,228);pdf.setLineWidth(0.5);
+   pdf.line(marge,pageH-13,pageW-marge,pageH-13);
+   pdf.setFont('helvetica','italic');pdf.setFontSize(7.5);pdf.setTextColor(150,140,155);
+   pdf.text("Généré avec le Générateur de préparations — Maternelle, conçu par Anaïs Delguste Ruelle",marge,pageH-8);
+   pdf.text('Page '+p+' / '+totalPages,pageW-marge,pageH-8,{align:'right'});
+  }
 
   const nom=(v('titre')||'preparation').replace(/[^\w\u00C0-\u017F -]/g,'').trim().slice(0,60)||'preparation';
   const blobPdf=pdf.output('blob');
   const url=proposerTelechargement(nom+'.pdf',blobPdf);
-  statut(`✅ PDF prêt : le téléchargement a dû démarrer automatiquement (regarde le dossier "Téléchargements" de ton appareil). Si tu ne vois rien, <a href="${url}" target="_blank" rel="noopener">clique ici pour l'ouvrir</a>, puis enregistre-le depuis ton navigateur.`,'ok');
+  statut(`✅ PDF prêt (texte natif, sélectionnable) : le téléchargement a dû démarrer automatiquement. Si tu ne vois rien, <a href="${url}" target="_blank" rel="noopener">clique ici pour l'ouvrir</a>, puis enregistre-le depuis ton navigateur.`,'ok');
  }catch(e){
-  statut("La génération du PDF a échoué (connexion nécessaire au premier essai pour charger l'outil). Réessaie, ou utilise « Imprimer (ordinateur) », ou le menu ⋮ de ton navigateur → « Imprimer la page ».",'err');
+  console.error(e);
+  statut("La génération du PDF a échoué. Réessaie, ou utilise « Imprimer (ordinateur) », ou le menu ⋮ de ton navigateur → « Imprimer la page ».",'err');
  }finally{
-  if(zone)zone.remove();
   btn.disabled=false;btn.textContent=texteOriginal;
  }
 }
