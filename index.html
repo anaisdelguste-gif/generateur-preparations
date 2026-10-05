@@ -674,12 +674,11 @@ RÈGLE DE FORME IMPÉRATIVE : chaque rubrique doit comporter de vrais sauts de l
 Écris en français, style sobre et professionnel, sans emoji, sans Markdown, À L'EXCEPTION des titres de phase du déroulement et des deux titres "**Remédiation**"/"**Dépassement**", encadrés de doubles astérisques comme indiqué (aucun autre usage d'astérisques). Utilise de vrais tirets "-" et des sauts de ligne \\n. Réponds uniquement par le JSON, rien d'autre. Chaque valeur textuelle contient les sauts de ligne nécessaires, pas un seul paragraphe compact.`;
 }
 
-/* ---- appel IA : Google Gemini (niveau gratuit, sans compte pour les collègues) ----
-   Clé obtenue gratuitement (sans carte bancaire) sur https://aistudio.google.com/apikey
-   Cette clé est visible dans le code de la page : c'est un compromis assumé, propre à
-   une clé gratuite (pas de facturation possible en cas d'usage abusif, seulement un
-   épuisement du quota gratuit du jour). */
-const GEMINI_API_KEY="AQ.Ab8RN6JV5iN07zbWEslhCH2yiaf7LpRe6ZOL83dWnE1-43vQzw";
+/* ---- appel IA : Google Gemini, via un petit relais gratuit (Cloudflare Worker) ----
+   La clé Gemini n'est PLUS dans ce fichier : elle est stockée dans le relais, hors de
+   GitHub. Une clé publiée dans une page ou un dépôt public est repérée puis désactivée
+   automatiquement par Google, d'où ce relais. */
+const RELAIS_URL="https://generateur-prepas.anais-delguste.workers.dev/";
 const GEMINI_MODEL="gemini-3.1-flash-lite";
 let ctl=null;
 function statut(t,c){const m=$('msg');m.className='status'+(c?' '+c:'');m.innerHTML=t}
@@ -747,14 +746,13 @@ async function construirePiecesJointes(){
 async function appellerGemini(promptTexte,signal,tentative,piecesJointes){
  tentative=tentative||1;
  piecesJointes=piecesJointes||[];
- if(!GEMINI_API_KEY||GEMINI_API_KEY==='COLLE_TA_CLE_GEMINI_ICI'){
+ if(!RELAIS_URL||RELAIS_URL.startsWith('COLLE_ICI')){
   const err=new Error('cle_manquante');err.code='cle_manquante';throw err;
  }
- // Les clés Gemini récentes (format "AQ.") s'envoient dans un en-tête, pas dans l'adresse.
- const url=`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+ const url=`${RELAIS_URL}?model=${encodeURIComponent(GEMINI_MODEL)}`;
  const resp=await fetch(url,{
   method:'POST',
-  headers:{'Content-Type':'application/json','x-goog-api-key':GEMINI_API_KEY},
+  headers:{'Content-Type':'application/json'},
   signal,
   body:JSON.stringify({
    contents:[{parts:[...piecesJointes,{text:promptTexte}]}],
@@ -805,8 +803,8 @@ $('btnIA').addEventListener('click',async()=>{
   const notePieces=(photos.length||pdfs.length)?" (en tenant compte des photos/documents joints)":"";
   statut((modeAuto?"Préparation générée : l'IA a choisi les références du référentiel ci-dessus (surlignées en vert). Relis et ajuste si besoin.":"Préparation générée"+notePieces+". Relis et ajuste avant d'imprimer.")+avertissementTronque,'ok');
  }catch(e){
-  const map={cle_manquante:"Aucune clé Gemini n'a été configurée sur cette page : utilise « 📋 Copier la consigne » en attendant, ou signale-le à la personne qui gère ce générateur.",
-   cle_invalide:"La clé Gemini configurée semble invalide ou expirée.",
+  const map={cle_manquante:"L'IA n'est pas encore branchée sur cette page : utilise « 📋 Copier la consigne » en attendant, ou signale-le à la personne qui gère ce générateur.",
+   cle_invalide:"L'accès à l'IA ne fonctionne plus (clé expirée ou relais mal configuré). Utilise « 📋 Copier la consigne » en attendant, et signale-le à la personne qui gère ce générateur.",
    rate_limited:"Trop de demandes d'affilée sur le quota gratuit. Attends une minute.",
    invalid_json:"Réponse inexploitable, réessaie.",
    erreur_serveur:"Le service est temporairement indisponible, réessaie dans un instant.",
